@@ -86,16 +86,8 @@
   .testata h1 { font-size: 24px; font-weight: 600; margin: 0; }
   .esci { display: flex; align-items: center; gap: 6px; font: inherit; font-size: 14px; font-weight: 500; color: var(--testo-2); background: var(--scheda); border: 1px solid var(--bordo); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
   .esci svg { font-size: 18px; }
-  .ricordami { margin-bottom: 14px; border: 1.5px solid var(--accento); }
-  .ricordami-titolo { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 600; }
-  .ricordami-titolo svg { font-size: 20px; color: var(--accento); }
-  .ricordami p { color: var(--testo-2); font-size: 14px; margin: 4px 0 0; }
-  .due-pulsanti { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .due-pulsanti .pulsante { margin-top: 14px; padding: 12px; font-size: 15px; }
-  .conferma, .avviso { display: flex; gap: 8px; align-items: flex-start; border-radius: var(--raggio-campo); padding: 10px 12px; margin-bottom: 14px; font-size: 14px; font-weight: 500; }
-  .conferma { background: var(--ok-chiaro); color: var(--ok); }
-  .avviso { background: var(--attenzione-chiaro); color: var(--attenzione); }
-  .conferma svg, .avviso svg { font-size: 18px; margin-top: 1px; }
+  .avviso { display: flex; gap: 8px; align-items: flex-start; border-radius: var(--raggio-campo); padding: 10px 12px; margin-bottom: 14px; font-size: 14px; font-weight: 500; background: var(--attenzione-chiaro); color: var(--attenzione); }
+  .avviso svg { font-size: 18px; margin-top: 1px; }
   .periodo { display: flex; align-items: center; gap: 8px; background: var(--accento-chiaro); color: var(--accento-testo); border-radius: var(--raggio-campo); padding: 10px 14px; font-size: 14px; font-weight: 500; margin-bottom: 16px; }
   .periodo svg { font-size: 18px; }
   .aggiornato { color: var(--testo-2); font-size: 12px; text-align: center; margin-top: 18px; }
@@ -143,7 +135,9 @@
     <h1>Bentornata</h1>
     <p class="sotto">Accedi per controllare i posti</p>
     <div class="avviso" id="avviso-login" hidden></div>
-    <form id="form-login" class="scheda" novalidate>
+    <!-- Il modulo viene "inviato" solo dentro questo riquadro nascosto e vuoto: serve al telefono per proporre di salvare la password -->
+    <iframe name="salva-credenziali" title="" hidden></iframe>
+    <form id="form-login" class="scheda" method="post" action="about:blank" target="salva-credenziali" novalidate>
       <label for="utente">Nome utente</label>
       <input id="utente" name="username" autocomplete="username" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="nome@utente">
       <label for="password">Password</label>
@@ -161,15 +155,6 @@
       <h1>Controllo</h1>
       <button class="esci" id="esci" type="button"><span data-icona="esci"></span>Esci</button>
     </div>
-    <div class="scheda ricordami" id="ricordami" hidden>
-      <div class="ricordami-titolo"><span data-icona="lucchetto"></span>Vuoi salvare le credenziali?</div>
-      <p>Restano su questo telefono: la prossima volta entri subito, senza riscriverle.</p>
-      <div class="due-pulsanti">
-        <button class="pulsante" id="ricorda-si" type="button">Sì, salva</button>
-        <button class="pulsante secondario" id="ricorda-no" type="button">No, grazie</button>
-      </div>
-    </div>
-    <div class="conferma" id="conferma-ricordami" hidden><span data-icona="ok"></span><span>Fatto: credenziali salvate su questo telefono. La prossima volta entri subito. Per scollegarti premi Esci.</span></div>
     <div class="periodo"><span data-icona="calendario"></span><span id="info-periodo"></span></div>
     <form id="form-ricerca" class="scheda" autocomplete="off" novalidate>
       <label for="targa">Targa</label>
@@ -266,25 +251,22 @@ async function apri(chiave) {
   $("info-aggiornato").textContent = `Elenco aggiornato al ${dataIt(dati.generato.slice(0, 10))} · ${dati.abbonamenti.length} abbonamenti`;
 }
 
-// ---------- "resta collegata": la chiave viene tenuta nel database del browser di questo dispositivo ----------
+// ---------- salvataggio delle credenziali: lo propone il telefono, non l'app ----------
 
-function archivio(modo, azione) {
-  return new Promise((ok, ko) => {
-    const richiesta = indexedDB.open("controllo-abbonamenti", 1);
-    richiesta.onupgradeneeded = () => richiesta.result.createObjectStore("accesso");
-    richiesta.onerror = () => ko(richiesta.error);
-    richiesta.onsuccess = () => {
-      const db = richiesta.result;
-      const tx = db.transaction("accesso", modo);
-      const r = azione(tx.objectStore("accesso"));
-      tx.oncomplete = () => { db.close(); ok(r && r.result); };
-      tx.onerror = () => { db.close(); ko(tx.error); };
-    };
-  });
+// Chrome / Android / Edge: avviso "Salvare la password?" del gestore password del telefono
+const gestorePassword = !!(window.PasswordCredential && navigator.credentials);
+
+function salvaNelTelefono(utente, password) {
+  // Safari e gli altri browser propongono il salvataggio quando il modulo viene "inviato" davvero:
+  // lo inviamo a un riquadro nascosto (about:blank), quindi la password non esce mai dal telefono.
+  HTMLFormElement.prototype.submit.call($("form-login"));
+  if (gestorePassword) {
+    navigator.credentials.store(new PasswordCredential({ id: utente.trim(), password, name: "Controllo Abbonamenti" })).catch(() => {});
+  }
 }
-const leggiChiaveSalvata = () => archivio("readonly", s => s.get("chiave")).catch(() => null);
-const salvaChiave = chiave => archivio("readwrite", s => s.put(chiave, "chiave"));
-const dimenticaChiave = () => archivio("readwrite", s => s.delete("chiave")).catch(() => {});
+
+// La versione precedente teneva una chiave nel database del browser: non serve più, la togliamo
+try { indexedDB.deleteDatabase("controllo-abbonamenti"); } catch {}
 
 $("occhio").addEventListener("click", () => {
   const campo = $("password");
@@ -310,11 +292,9 @@ $("form-login").addEventListener("submit", async e => {
   $("entra").textContent = "Accesso in corso…";
   try {
     await apri(await derivaChiave($("utente").value, $("password").value));
-    // La password resta nel campo (nascosto) finché lei non risponde alla domanda sul salvataggio:
-    // se la cancellassimo subito, il telefono non proporrebbe di memorizzarla.
     $("avviso-login").hidden = true;
-    $("ricordami").hidden = !window.indexedDB;
-    $("conferma-ricordami").hidden = true;
+    // La password resta nel campo nascosto finché non preme Esci: il telefono deve poterla leggere per salvarla
+    salvaNelTelefono($("utente").value, $("password").value);
     mostra("schermata-ricerca");
   } catch {
     mostraErrore("errore-login", "Nome utente o password sbagliati. Riprova.");
@@ -324,61 +304,31 @@ $("form-login").addEventListener("submit", async e => {
   }
 });
 
-// Salva anche nel gestore password del telefono (Chrome/Android lo chiede con un suo avviso;
-// Safari lo propone da solo dopo "Entra"): se un giorno l'accesso salvato sparisce, i campi si compilano da soli.
-async function salvaNelTelefono() {
-  const utente = $("utente").value.trim(), password = $("password").value;
-  if (!window.PasswordCredential || !utente || !password) return;
-  try { await navigator.credentials.store(new PasswordCredential({ id: utente, password, name: "Controllo Abbonamenti" })); } catch {}
-}
-
-$("ricorda-si").addEventListener("click", async () => {
-  try {
-    await salvaChiave(chiaveAttuale);
-    $("ricordami").hidden = true;
-    $("conferma-ricordami").hidden = false;
-    setTimeout(() => { $("conferma-ricordami").hidden = true; }, 6000);
-  } catch {
-    $("ricordami").hidden = true;
-  }
-  await salvaNelTelefono();
-  $("password").value = "";
-});
-$("ricorda-no").addEventListener("click", () => {
-  $("ricordami").hidden = true;
-  $("password").value = "";
-});
-
-// Esci scollega anche il dispositivo: la prossima volta servirà di nuovo la password
+// Esci: il telefono non la fa più rientrare da sola (i campi però restano compilabili con la password salvata)
 async function esci() {
   dati = null;
   chiaveAttuale = null;
-  await dimenticaChiave();
+  if (gestorePassword) await navigator.credentials.preventSilentAccess().catch(() => {});
   $("targa").value = $("posto").value = $("utente").value = $("password").value = "";
   $("risultato").innerHTML = "";
-  $("ricordami").hidden = $("conferma-ricordami").hidden = true;
   mostraErrore("errore-ricerca", "");
   mostra("schermata-login");
 }
 $("esci").addEventListener("click", esci);
 $("esci-2").addEventListener("click", esci);
 
-// All'apertura: se su questo dispositivo ha scelto "resta collegata", entra subito
+// All'apertura: se il telefono ha la password salvata, la usa per entrare da sola (Chrome / Android)
 (async () => {
-  const salvata = window.crypto && crypto.subtle && window.indexedDB ? await leggiChiaveSalvata() : null;
-  if (salvata) {
-    try {
-      await apri(salvata);
-      mostra("schermata-ricerca");
-      return;
-    } catch {
-      // La password è stata cambiata: la chiave salvata non va più bene
-      await dimenticaChiave();
-      $("avviso-login").innerHTML = icona("info") + "<span>La password è cambiata: accedi di nuovo con quella nuova.</span>";
-      $("avviso-login").hidden = false;
-    }
-  }
   mostra("schermata-login");
+  if (!gestorePassword || !window.crypto || !crypto.subtle) return;
+  try {
+    const credenziale = await navigator.credentials.get({ password: true, mediation: "optional" });
+    if (credenziale && credenziale.password) {
+      $("utente").value = credenziale.id;
+      $("password").value = credenziale.password;
+      $("form-login").requestSubmit();
+    }
+  } catch {}
 })();
 
 // ---------- verifica ----------
